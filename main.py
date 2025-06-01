@@ -1,45 +1,14 @@
 from arcgis.features import FeatureLayer
 from arcgis.gis import GIS
 import pandas as pd
+from datetime import datetime
 
 
-def get_all_features(service, batch_size=200, max_rows=None):
-    """Get features from a service in batches.
-
-    Args:
-        service: The FeatureLayer service to query
-        batch_size: Number of records to fetch per batch
-        max_rows: Maximum total number of rows to fetch (None for all rows)
-    """
-    all_features = []
-    offset = 0
-
-    while True:
-        # Calculate how many records to fetch in this batch
-        if max_rows is not None:
-            remaining = max_rows - len(all_features)
-            if remaining <= 0:
-                break
-            current_batch_size = min(batch_size, remaining)
-        else:
-            current_batch_size = batch_size
-
-        result = service.query(
-            out_fields="iden, rotacio, objectid",
-            result_record_count=current_batch_size,
-            result_offset=offset,
-        )
-
-        if not result.features:
-            break
-
-        all_features.extend(result.features)
-        offset += current_batch_size
-
-        if len(result.features) < current_batch_size:
-            break
-
-    return pd.DataFrame([f.as_dict["attributes"] for f in all_features])
+def get_features(service):
+    result = service.query(
+        out_fields="iden, rotacio, objectid",
+    )
+    return pd.DataFrame([f.as_dict["attributes"] for f in result.features])
 
 
 def main():
@@ -67,16 +36,12 @@ def main():
             gis_dev,
         )
 
-        # Configure these parameters as needed
-        BATCH_SIZE = 200
-        MAX_ROWS = 400  # Set to a number to limit total rows, or None for all rows
-
         print("Fetching features from pre environment...")
-        df_pre = get_all_features(service_pre, batch_size=BATCH_SIZE, max_rows=MAX_ROWS)
+        df_pre = get_features(service_pre)
         print(f"Found {len(df_pre)} features in pre environment")
 
         print("Fetching features from dev environment...")
-        df_dev = get_all_features(service_dev, batch_size=BATCH_SIZE, max_rows=MAX_ROWS)
+        df_dev = get_features(service_dev)
         print(f"Found {len(df_dev)} features in dev environment")
 
         # Merge the dataframes on 'iden' to compare 'rotacio' values
@@ -87,15 +52,19 @@ def main():
             merged_df["rotacio_pre"] != merged_df["rotacio_dev"]
         ]
 
-        print(
-            f"\nFound {len(different_rotacio)} records with different rotacio values:"
-        )
-        for _, row in different_rotacio.iterrows():
-            print(f"iden: {row['iden']}")
-            print(f"  Pre rotacio: {row['rotacio_pre']}")
-            print(f"  Dev rotacio: {row['rotacio_dev']}")
-            print(f"  Dev objectid: {row['objectid_dev']}")
-            print()
+        # Select and rename columns for the output
+        output_df = different_rotacio[
+            ["iden", "rotacio_pre", "rotacio_dev", "objectid_dev"]
+        ]
+
+        # Generate filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"rotacio_differences_{timestamp}.xlsx"
+
+        # Save to Excel
+        output_df.to_excel(filename, index=False)
+        print(f"\nFound {len(different_rotacio)} records with different rotacio values")
+        print(f"Results saved to: {filename}")
 
     except Exception as e:
         print(f"An error occurred: {str(e)}")
